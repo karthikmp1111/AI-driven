@@ -45,6 +45,7 @@ pipeline {
             echo "Changes detected or zip missing — building and uploading Lambda package."
             sh """
               cd ${LAMBDA_PATH}
+              chmod +x build.sh
               ./build.sh
               aws s3 cp ${ZIP_NAME} s3://${S3_BUCKET}/${S3_LAMBDA_KEY}
             """
