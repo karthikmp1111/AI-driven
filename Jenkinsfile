@@ -2,30 +2,72 @@ pipeline {
   agent any
 
   environment {
-    AWS_REGION = "us-west-1"
-    S3_BUCKET = "bg-kar-terraform-state"
-    LAMBDA_PATH = "lambda" // directory containing lambda_function.py and build.sh
-    LAMBDA_S3_KEY = "lambda-packages/lambda/lambda_function.zip"
+    AWS_REGION = 'us-west-1'
+    S3_BUCKET = 'kar-weather-s3'
+    LAMBDA_PATH = 'lambda'
+    ZIP_NAME = 'lambda_function.zip'
+    S3_LAMBDA_KEY = 'lambda-packages/lambda/lambda_function.zip'
   }
 
   parameters {
-    choice(name: 'APPLY_OR_DESTROY', choices: ['apply', 'destroy'], description: 'Apply or Destroy Terraform infra')
+    choice(name: 'APPLY_OR_DESTROY', choices: ['apply', 'destroy'], description: 'Apply or destroy Terraform infrastructure')
   }
 
   stages {
-    stage('Build Lambda Package') {
+    stage('Checkout Code') {
       steps {
-        dir("${env.LAMBDA_PATH}") {
-          echo "Building Lambda zip..."
-          sh "bash build.sh"
+        git branch: 'main', url: 'https://github.com/karthikmp1111/AI-driven.git'
+      }
+    }
+
+    stage('Setup AWS Credentials') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY'),
+          string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_KEY')
+        ]) {
+          sh '''
+          aws configure set aws_access_key_id $AWS_ACCESS_KEY
+          aws configure set aws_secret_access_key $AWS_SECRET_KEY
+          aws configure set region $AWS_REGION
+          '''
         }
       }
     }
 
-    stage('Upload to S3') {
+    stage('Build and Upload Lambda Package') {
       steps {
-        echo "Uploading Lambda zip to S3..."
-        sh "aws s3 cp ${LAMBDA_PATH}/lambda_function.zip s3://${S3_BUCKET}/${LAMBDA_S3_KEY}"
+        script {
+          def changes = sh(script: "git diff --name-only HEAD~1 ${LAMBDA_PATH} || true", returnStdout: true).trim()
+          def zipExists = fileExists("${LAMBDA_PATH}/${ZIP_NAME}")
+
+          if (changes || !zipExists) {
+            echo "Changes detected or zip missing — building and uploading Lambda package."
+            sh """
+              cd ${LAMBDA_PATH}
+              chmod +x build.sh
+               sudo apt-get update && sudo apt-get install -y python3 python3-pip
+              ./build.sh
+              aws s3 cp ${ZIP_NAME} s3://${S3_BUCKET}/${S3_LAMBDA_KEY}
+            """
+          } else {
+            echo "No changes to Lambda and zip already exists — skipping build/upload."
+          }
+        }
+      }
+    }
+
+    stage('Copy or Download Lambda Zip') {
+      steps {
+        sh """
+          if [ -f ${LAMBDA_PATH}/${ZIP_NAME} ]; then
+            echo "Copying built zip to terraform directory"
+            cp ${LAMBDA_PATH}/${ZIP_NAME} terraform/${ZIP_NAME}
+          else
+            echo "Zip not found locally. Downloading from S3"
+            aws s3 cp s3://${S3_BUCKET}/${S3_LAMBDA_KEY} terraform/${ZIP_NAME}
+          fi
+        """
       }
     }
 
@@ -40,13 +82,8 @@ pipeline {
     stage('Terraform Plan') {
       steps {
         dir('terraform') {
-          script {
-            if (params.APPLY_OR_DESTROY == 'apply') {
-              sh 'terraform plan -out=tfplan'
-            } else {
-              sh 'terraform destroy -auto-approve'
-            }
-          }
+          sh 'test -f lambda_function.zip || echo "WARNING: lambda_function.zip not found"'
+          sh 'terraform plan -out=tfplan'
         }
       }
     }
@@ -59,6 +96,23 @@ pipeline {
         dir('terraform') {
           sh 'terraform apply -auto-approve tfplan'
         }
+      }
+    }
+
+    stage('Terraform Destroy') {
+      when {
+        expression { params.APPLY_OR_DESTROY == 'destroy' }
+      }
+      steps {
+        dir('terraform') {
+          sh 'terraform destroy -auto-approve'
+        }
+      }
+    }
+
+    stage('Clean Workspace') {
+      steps {
+        cleanWs()
       }
     }
   }
