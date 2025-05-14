@@ -8,17 +8,17 @@ pipeline {
     }
 
     parameters {
-        choice(name: 'APPLY_OR_DESTROY', choices: ['apply', 'destroy'], description: 'Choose apply or destroy')
+        choice(name: 'APPLY_OR_DESTROY', choices: ['apply', 'destroy'], description: 'Choose whether to apply or destroy Terraform resources')
     }
 
     stages {
         stage('Checkout Code') {
             steps {
-                git branch: 'main', url: 'https://github.com/karthikmp1111/AI-driven.git'
+                git branch: 'main', url: 'https://github.com/karthikmp1111/multi-lambda.git'
             }
         }
 
-        stage('Configure AWS CLI') {
+        stage('Setup AWS Credentials') {
             steps {
                 withCredentials([
                     string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY'),
@@ -44,6 +44,7 @@ pipeline {
                         echo "Changes detected in lambda folder. Building package..."
                         sh "bash ${LAMBDA_FOLDER}/build.sh"
                         sh "aws s3 cp ${LAMBDA_FOLDER}/lambda_function.zip s3://$S3_BUCKET/lambda-packages/lambda/lambda_function.zip"
+                        sh "cp ${LAMBDA_FOLDER}/lambda_function.zip terraform/"
                     } else {
                         echo "No changes in lambda folder. Skipping build."
                     }

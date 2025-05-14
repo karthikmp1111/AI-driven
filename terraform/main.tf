@@ -2,14 +2,15 @@ provider "aws" {
   region = var.aws_region
 }
 
+# IAM Role for Lambda
 resource "aws_iam_role" "lambda_exec_role" {
   name = "lambda_weather_exec_role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17",
     Statement = [{
-      Action    = "sts:AssumeRole",
       Effect    = "Allow",
+      Action    = "sts:AssumeRole",
       Principal = {
         Service = "lambda.amazonaws.com"
       }
@@ -17,6 +18,7 @@ resource "aws_iam_role" "lambda_exec_role" {
   })
 }
 
+# Attach IAM Policies
 resource "aws_iam_policy_attachment" "lambda_basic" {
   name       = "lambda-basic"
   roles      = [aws_iam_role.lambda_exec_role.name]
@@ -29,6 +31,7 @@ resource "aws_iam_policy_attachment" "lambda_s3_access" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
 }
 
+# Lambda Function from S3
 resource "aws_lambda_function" "weather" {
   function_name = var.lambda_function_name
   role          = aws_iam_role.lambda_exec_role.arn
@@ -38,7 +41,7 @@ resource "aws_lambda_function" "weather" {
   s3_bucket = var.s3_bucket
   s3_key    = "lambda-packages/lambda/lambda_function.zip"
 
-  source_code_hash = filebase64sha256("${path.module}/../lambda/lambda_function.zip")
+  source_code_hash = filebase64sha256("${path.module}/lambda_function.zip")
 
   environment {
     variables = {
@@ -49,12 +52,14 @@ resource "aws_lambda_function" "weather" {
   }
 }
 
+# EventBridge Rule to Trigger Lambda Every Minute
 resource "aws_cloudwatch_event_rule" "every_1_min" {
   name                = "run-weather-lambda-every-1min"
   description         = "Trigger Lambda function every 1 minute"
   schedule_expression = "rate(1 minute)"
 }
 
+# Permission for EventBridge to Invoke Lambda
 resource "aws_lambda_permission" "allow_eventbridge" {
   statement_id  = "AllowExecutionFromEventBridge"
   action        = "lambda:InvokeFunction"
@@ -63,6 +68,7 @@ resource "aws_lambda_permission" "allow_eventbridge" {
   source_arn    = aws_cloudwatch_event_rule.every_1_min.arn
 }
 
+# Link Lambda with Event Rule
 resource "aws_cloudwatch_event_target" "lambda_trigger" {
   rule      = aws_cloudwatch_event_rule.every_1_min.name
   target_id = "weather-lambda"
