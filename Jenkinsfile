@@ -1,119 +1,100 @@
 pipeline {
-  agent any
+    agent any
 
-  environment {
-    AWS_REGION = 'us-west-1'
-    S3_BUCKET = 'kar-weather-s3'
-    LAMBDA_PATH = 'lambda'
-    ZIP_NAME = 'lambda_function.zip'
-    S3_LAMBDA_KEY = 'lambda-packages/lambda/lambda_function.zip'
-  }
-
-  parameters {
-    choice(name: 'APPLY_OR_DESTROY', choices: ['apply', 'destroy'], description: 'Apply or destroy Terraform infrastructure')
-  }
-
-  stages {
-    stage('Checkout Code') {
-      steps {
-        git branch: 'main', url: 'https://github.com/karthikmp1111/AI-driven.git'
-      }
+    environment {
+        AWS_REGION = 'us-west-1'
+        S3_BUCKET = 'bg-kar-terraform-state'
+        LAMBDA_PATH = 'lambda'
+        LAMBDA_S3_KEY = 'lambda-packages/lambda/lambda_function.zip'
     }
 
-    stage('Setup AWS Credentials') {
-      steps {
-        withCredentials([
-          string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY'),
-          string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_KEY')
-        ]) {
-          sh '''
-          aws configure set aws_access_key_id $AWS_ACCESS_KEY
-          aws configure set aws_secret_access_key $AWS_SECRET_KEY
-          aws configure set region $AWS_REGION
-          '''
+    parameters {
+        choice(name: 'APPLY_OR_DESTROY', choices: ['apply', 'destroy'], description: 'Apply or Destroy Terraform resources')
+    }
+
+    stages {
+        stage('Checkout Code') {
+            steps {
+                git branch: 'main', url: 'https://github.com/karthikmp1111/AI-driven.git'
+            }
         }
-      }
-    }
 
-    stage('Build and Upload Lambda Package') {
-      steps {
-        script {
-          def changes = sh(script: "git diff --name-only HEAD~1 ${LAMBDA_PATH} || true", returnStdout: true).trim()
-          def zipExists = fileExists("${LAMBDA_PATH}/${ZIP_NAME}")
-
-          if (changes || !zipExists) {
-            echo "Changes detected or zip missing — building and uploading Lambda package."
-            sh """
-              cd ${LAMBDA_PATH}
-              chmod +x build.sh
-               sudo apt-get update && sudo apt-get install -y python3 python3-pip
-              ./build.sh
-              aws s3 cp ${ZIP_NAME} s3://${S3_BUCKET}/${S3_LAMBDA_KEY}
-            """
-          } else {
-            echo "No changes to Lambda and zip already exists — skipping build/upload."
-          }
+        stage('Setup AWS Credentials') {
+            steps {
+                withCredentials([
+                    string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY'),
+                    string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_KEY')
+                ]) {
+                    sh '''
+                        aws configure set aws_access_key_id $AWS_ACCESS_KEY
+                        aws configure set aws_secret_access_key $AWS_SECRET_KEY
+                        aws configure set region $AWS_REGION
+                    '''
+                }
+            }
         }
-      }
-    }
 
-    stage('Copy or Download Lambda Zip') {
-      steps {
-        sh """
-          if [ -f ${LAMBDA_PATH}/${ZIP_NAME} ]; then
-            echo "Copying built zip to terraform directory"
-            cp ${LAMBDA_PATH}/${ZIP_NAME} terraform/${ZIP_NAME}
-          else
-            echo "Zip not found locally. Downloading from S3"
-            aws s3 cp s3://${S3_BUCKET}/${S3_LAMBDA_KEY} terraform/${ZIP_NAME}
-          fi
-        """
-      }
-    }
-
-    stage('Terraform Init') {
-      steps {
-        dir('terraform') {
-          sh 'terraform init'
+        stage('Build and Upload Lambda Package') {
+            when {
+                expression { params.APPLY_OR_DESTROY == 'apply' }
+            }
+            steps {
+                script {
+                    // Detect changes in the lambda directory
+                    def hasChanges = sh(script: "git diff --quiet HEAD~1 ${LAMBDA_PATH}", returnStatus: true) != 0
+                    if (hasChanges) {
+                        echo "Changes detected in Lambda. Building and uploading package..."
+                        sh "bash ${LAMBDA_PATH}/build.sh"
+                        sh "aws s3 cp ${LAMBDA_PATH}/lambda_function.zip s3://$S3_BUCKET/$LAMBDA_S3_KEY"
+                    } else {
+                        echo "No changes detected in Lambda. Skipping build/upload."
+                    }
+                }
+            }
         }
-      }
-    }
 
-    stage('Terraform Plan') {
-      steps {
-        dir('terraform') {
-          sh 'test -f lambda_function.zip || echo "WARNING: lambda_function.zip not found"'
-          sh 'terraform plan -out=tfplan'
+        stage('Terraform Init') {
+            steps {
+                dir('terraform') {
+                    sh 'terraform init'
+                }
+            }
         }
-      }
-    }
 
-    stage('Terraform Apply') {
-      when {
-        expression { params.APPLY_OR_DESTROY == 'apply' }
-      }
-      steps {
-        dir('terraform') {
-          sh 'terraform apply -auto-approve tfplan'
+        stage('Terraform Plan') {
+            steps {
+                dir('terraform') {
+                    sh 'terraform plan -out=tfplan'
+                }
+            }
         }
-      }
-    }
 
-    stage('Terraform Destroy') {
-      when {
-        expression { params.APPLY_OR_DESTROY == 'destroy' }
-      }
-      steps {
-        dir('terraform') {
-          sh 'terraform destroy -auto-approve'
+        stage('Terraform Apply') {
+            when {
+                expression { params.APPLY_OR_DESTROY == 'apply' }
+            }
+            steps {
+                dir('terraform') {
+                    sh 'terraform apply -auto-approve tfplan'
+                }
+            }
         }
-      }
-    }
 
-    stage('Clean Workspace') {
-      steps {
-        cleanWs()
-      }
+        stage('Terraform Destroy') {
+            when {
+                expression { params.APPLY_OR_DESTROY == 'destroy' }
+            }
+            steps {
+                dir('terraform') {
+                    sh 'terraform destroy -auto-approve'
+                }
+            }
+        }
+
+        stage('Clean Workspace') {
+            steps {
+                cleanWs()
+            }
+        }
     }
-  }
 }
