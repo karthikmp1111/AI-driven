@@ -4,9 +4,9 @@ pipeline {
   environment {
     AWS_REGION = 'us-west-1'
     S3_BUCKET = 'kar-weather-s3'
-    LAMBDA_PATH = 'lambda'
+    LAMBDA_NAME = 'lambda'
     ZIP_NAME = 'lambda_function.zip'
-    S3_LAMBDA_KEY = 'lambda-packages/lambda/lambda_function.zip'
+    S3_LAMBDA_KEY = "lambda-packages/${LAMBDA_NAME}/${ZIP_NAME}"
   }
 
   parameters {
@@ -27,24 +27,27 @@ pipeline {
           string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_KEY')
         ]) {
           sh '''
-          aws configure set aws_access_key_id $AWS_ACCESS_KEY
-          aws configure set aws_secret_access_key $AWS_SECRET_KEY
-          aws configure set region $AWS_REGION
+            aws configure set aws_access_key_id $AWS_ACCESS_KEY
+            aws configure set aws_secret_access_key $AWS_SECRET_KEY
+            aws configure set region $AWS_REGION
           '''
         }
       }
     }
 
     stage('Build and Upload Lambda Package') {
+      when {
+        expression { params.APPLY_OR_DESTROY == 'apply' }
+      }
       steps {
         script {
-          def changes = sh(script: "git diff --name-only HEAD~1 ${LAMBDA_PATH} || true", returnStdout: true).trim()
-          def zipExists = fileExists("${LAMBDA_PATH}/${ZIP_NAME}")
+          def hasChanges = sh(script: "git diff --quiet HEAD~1 ${LAMBDA_NAME}", returnStatus: true) != 0
+          def zipExists = fileExists("${LAMBDA_NAME}/${ZIP_NAME}")
 
-          if (changes || !zipExists) {
+          if (hasChanges || !zipExists) {
             echo "Changes detected or zip missing — building and uploading Lambda package."
             sh """
-              cd ${LAMBDA_PATH}
+              cd ${LAMBDA_NAME}
               chmod +x build.sh
               ./build.sh
               aws s3 cp ${ZIP_NAME} s3://${S3_BUCKET}/${S3_LAMBDA_KEY}
@@ -58,23 +61,22 @@ pipeline {
 
     stage('Copy or Download Lambda Zip') {
       steps {
-        sh """
-          if [ -f ${LAMBDA_PATH}/${ZIP_NAME} ]; then
+        script {
+          if (fileExists("${LAMBDA_NAME}/${ZIP_NAME}")) {
             echo "Copying built zip to terraform directory"
-            cp ${LAMBDA_PATH}/${ZIP_NAME} terraform/${ZIP_NAME}
-          else
+            sh "cp ${LAMBDA_NAME}/${ZIP_NAME} terraform/${ZIP_NAME}"
+          } else {
             echo "Zip not found locally. Downloading from S3"
-            aws s3 cp s3://${S3_BUCKET}/${S3_LAMBDA_KEY} terraform/${ZIP_NAME}
-          fi
-        """
+            sh "aws s3 cp s3://${S3_BUCKET}/${S3_LAMBDA_KEY} terraform/${ZIP_NAME}"
+          }
+        }
       }
     }
 
     stage('Terraform Init') {
       steps {
         dir('terraform') {
-          // sh 'terraform init -reconfigure'
-          sh 'terraform init'
+          sh 'terraform init -reconfigure'
         }
       }
     }
@@ -82,7 +84,6 @@ pipeline {
     stage('Terraform Plan') {
       steps {
         dir('terraform') {
-          sh 'test -f lambda_function.zip || echo "WARNING: lambda_function.zip not found"'
           sh 'terraform plan -out=tfplan'
         }
       }
