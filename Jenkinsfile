@@ -46,7 +46,6 @@ pipeline {
             sh """
               cd ${LAMBDA_PATH}
               chmod +x build.sh
-               sudo apt-get update && sudo apt-get install -y python3 python3-pip
               ./build.sh
               aws s3 cp ${ZIP_NAME} s3://${S3_BUCKET}/${S3_LAMBDA_KEY}
             """
@@ -74,7 +73,7 @@ pipeline {
     stage('Terraform Init') {
       steps {
         dir('terraform') {
-          sh 'terraform init -reconfigure'
+          // sh 'terraform init -reconfigure'
           sh 'terraform init'
         }
       }
