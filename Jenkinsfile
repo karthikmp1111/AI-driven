@@ -3,9 +3,10 @@ pipeline {
 
   environment {
     AWS_REGION = 'us-west-1'
-    S3_BUCKET = 'bg-kar-terraform-state'
+    S3_BUCKET = 'kar-weather-s3'
     LAMBDA_PATH = 'lambda'
     ZIP_NAME = 'lambda_function.zip'
+    S3_LAMBDA_KEY = 'lambda-packages/lambda/lambda_function.zip'
   }
 
   parameters {
@@ -35,20 +36,36 @@ pipeline {
     }
 
     stage('Build and Upload Lambda Package') {
-      when {
-        expression { params.APPLY_OR_DESTROY == 'apply' }
-      }
       steps {
         script {
-          if (sh(script: "git diff --quiet HEAD~1 ${LAMBDA_PATH}", returnStatus: true) != 0) {
-            echo "Changes detected in Lambda code. Building package..."
-            sh "chmod +x ${LAMBDA_PATH}/build.sh && bash ${LAMBDA_PATH}/build.sh"
-            sh "cp ${LAMBDA_PATH}/${ZIP_NAME} terraform/"
-            sh "aws s3 cp ${LAMBDA_PATH}/${ZIP_NAME} s3://${S3_BUCKET}/lambda-packages/${ZIP_NAME}"
+          def changes = sh(script: "git diff --name-only HEAD~1 ${LAMBDA_PATH} || true", returnStdout: true).trim()
+          def zipExists = fileExists("${LAMBDA_PATH}/${ZIP_NAME}")
+
+          if (changes || !zipExists) {
+            echo "Changes detected or zip missing — building and uploading Lambda package."
+            sh """
+              cd ${LAMBDA_PATH}
+              ./build.sh
+              aws s3 cp ${ZIP_NAME} s3://${S3_BUCKET}/${S3_LAMBDA_KEY}
+            """
           } else {
-            echo "No changes detected in Lambda code. Skipping build and upload."
+            echo "No changes to Lambda and zip already exists — skipping build/upload."
           }
         }
+      }
+    }
+
+    stage('Copy or Download Lambda Zip') {
+      steps {
+        sh """
+          if [ -f ${LAMBDA_PATH}/${ZIP_NAME} ]; then
+            echo "Copying built zip to terraform directory"
+            cp ${LAMBDA_PATH}/${ZIP_NAME} terraform/${ZIP_NAME}
+          else
+            echo "Zip not found locally. Downloading from S3"
+            aws s3 cp s3://${S3_BUCKET}/${S3_LAMBDA_KEY} terraform/${ZIP_NAME}
+          fi
+        """
       }
     }
 
@@ -63,7 +80,7 @@ pipeline {
     stage('Terraform Plan') {
       steps {
         dir('terraform') {
-          sh "test -f ${ZIP_NAME} || echo 'No lambda zip found, assuming unchanged'"
+          sh 'test -f lambda_function.zip || echo "WARNING: lambda_function.zip not found"'
           sh 'terraform plan -out=tfplan'
         }
       }
