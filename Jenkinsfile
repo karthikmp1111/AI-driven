@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         AWS_REGION = 'us-west-1'
-        S3_BUCKET = 'bg-kar-terraform-state'
+        S3_BUCKET = 'kar-weather-s3'
         LAMBDA_PATH = 'lambda'
         LAMBDA_S3_KEY = 'lambda-packages/lambda/lambda_function.zip'
     }
