@@ -6,12 +6,17 @@ pipeline {
         S3_BUCKET = 'kar-weather-s3'
         LAMBDA_NAME = 'lambda'
         LAMBDA_PATH = "lambda-functions/lambda"
-        PACKAGE_ZIP = "lambda-functions/lambda/package.zip"
+        PACKAGE_ZIP = "${LAMBDA_PATH}/package.zip"
         TERRAFORM_ZIP = "terraform/lambda_function.zip"
     }
 
     parameters {
         choice(name: 'APPLY_OR_DESTROY', choices: ['apply', 'destroy'], description: 'Apply or destroy Terraform infrastructure')
+    }
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
     }
 
     stages {
@@ -21,36 +26,50 @@ pipeline {
             }
         }
 
-        stage('Setup AWS Credentials') {
+        stage('Verify AWS Credentials') {
             steps {
                 withCredentials([
                     string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY'),
                     string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_KEY')
                 ]) {
                     sh '''
-                        aws configure set aws_access_key_id $AWS_ACCESS_KEY
-                        aws configure set aws_secret_access_key $AWS_SECRET_KEY
-                        aws configure set region $AWS_REGION
+                        export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY
+                        export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_KEY
+                        export AWS_DEFAULT_REGION=$AWS_REGION
+                        aws sts get-caller-identity
                     '''
                 }
             }
         }
 
-        stage('Build and Upload Lambda Packages') {
+        stage('Build & Upload Lambda') {
             when {
                 expression { params.APPLY_OR_DESTROY == 'apply' }
             }
             steps {
                 script {
-                    echo "Checking changes for Lambda: ${env.LAMBDA_NAME}"
-                    def hasChanges = (sh(script: "git diff --quiet HEAD~1 ${env.LAMBDA_PATH}", returnStatus: true) != 0)
-                    
-                    if (hasChanges) {
-                        echo "Changes detected for ${env.LAMBDA_NAME}, building and uploading..."
-                        sh "bash ${env.LAMBDA_PATH}/build.sh"
-                        sh "aws s3 cp ${env.PACKAGE_ZIP} s3://${env.S3_BUCKET}/lambda-packages/${env.LAMBDA_NAME}/package.zip"
+                    def changes = sh(script: "git diff --quiet origin/main -- ${LAMBDA_PATH}", returnStatus: true)
+                    if (changes != 0) {
+                        echo "Changes detected for ${LAMBDA_NAME}."
+
+                        // Build Lambda package
+                        sh "bash ${LAMBDA_PATH}/build.sh"
+
+                        // Upload to S3
+                        sh "aws s3 cp ${PACKAGE_ZIP} s3://${S3_BUCKET}/lambda-packages/${LAMBDA_NAME}/package.zip"
+
+                        // Copy to Terraform folder
+                        sh "cp ${PACKAGE_ZIP} ${TERRAFORM_ZIP}"
                     } else {
-                        echo "No changes detected in ${env.LAMBDA_NAME}, skipping build and upload."
+                        echo "No changes in ${LAMBDA_NAME}. Checking if previous package exists..."
+                        sh '''
+                            if [ -f "${PACKAGE_ZIP}" ]; then
+                                cp ${PACKAGE_ZIP} ${TERRAFORM_ZIP}
+                            else
+                                echo "No existing package.zip found. Terraform may fail."
+                                exit 1
+                            fi
+                        '''
                     }
                 }
             }
@@ -59,7 +78,7 @@ pipeline {
         stage('Terraform Init') {
             steps {
                 dir('terraform') {
-                    sh 'terraform init'
+                    sh 'terraform init -input=false'
                 }
             }
         }
@@ -100,7 +119,17 @@ pipeline {
             }
         }
     }
+
+    post {
+        failure {
+            echo 'Build failed. Cleaning up credentials and temporary files.'
+        }
+        always {
+            echo 'Pipeline completed.'
+        }
+    }
 }
+
 
 
 
