@@ -44,8 +44,8 @@ pipeline {
                 script {
                     def lambdaName = 'lambda'
                     def lambdaPath = "lambda-functions/${lambdaName}"
-                    def s3Key = "lambda-packages/${lambdaName}/package.zip"
-                    def localZip = "${lambdaPath}/package.zip"
+                    def s3Key = "lambda-packages/${lambdaName}/lambda_function.zip"
+                    def localZip = "${lambdaPath}/lambda_function.zip"
 
                     def lambdaChanged = (sh(script: "git diff --quiet HEAD~1 ${lambdaPath}", returnStatus: true) != 0)
 
@@ -55,7 +55,7 @@ pipeline {
                         sh "aws s3 cp ${localZip} s3://${S3_BUCKET}/${s3Key}"
                     } else {
                         echo "No changes detected in ${lambdaName}, downloading package from S3..."
-                        sh "mkdir -p ${lambdaPath}" // Ensure directory exists
+                        sh "mkdir -p ${lambdaPath}" // ensure directory exists
                         sh "aws s3 cp s3://${S3_BUCKET}/${s3Key} ${localZip}"
                     }
 
@@ -64,7 +64,6 @@ pipeline {
                 }
             }
         }
-
 
         stage('Terraform Init') {
             steps {
