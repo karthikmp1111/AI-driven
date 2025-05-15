@@ -36,30 +36,30 @@ pipeline {
             }
         }
 
-        stage('Build and Upload Lambda Package') {
+        stage('Build or Download Lambda Package') {
             when {
                 expression { params.APPLY_OR_DESTROY == 'apply' }
             }
             steps {
                 script {
-                    def lambdaName = 'lambda'  // directory name under lambda-functions/
+                    def lambdaName = 'lambda'
                     def lambdaPath = "lambda-functions/${lambdaName}"
+                    def s3Key = "lambda-packages/${lambdaName}/package.zip"
+                    def localZip = "${lambdaPath}/package.zip"
 
-                    // Check if there are any changes for the lambda function
-                    if (sh(script: "git diff --quiet HEAD~1 ${lambdaPath}", returnStatus: true) != 0) {
+                    def lambdaChanged = (sh(script: "git diff --quiet HEAD~1 ${lambdaPath}", returnStatus: true) != 0)
+
+                    if (lambdaChanged) {
                         echo "Changes detected for ${lambdaName}, building and uploading..."
-                        
-                        // Build the Lambda package (this should create package.zip)
                         sh "bash ${lambdaPath}/build.sh"
-
-                        // Upload the built Lambda package to S3
-                        sh "aws s3 cp ${lambdaPath}/package.zip s3://${S3_BUCKET}/lambda-packages/${lambdaName}/package.zip"
+                        sh "aws s3 cp ${localZip} s3://${S3_BUCKET}/${s3Key}"
                     } else {
-                        echo "No changes detected in ${lambdaName}, skipping build and upload."
+                        echo "No changes detected in ${lambdaName}, downloading package from S3..."
+                        sh "aws s3 cp s3://${S3_BUCKET}/${s3Key} ${localZip}"
                     }
 
-                    // Copy the built package to Terraform directory for deployment
-                    sh "cp ${lambdaPath}/package.zip ${TERRAFORM_ZIP}"
+                    // Copy package to Terraform folder
+                    sh "cp ${localZip} ${TERRAFORM_ZIP}"
                 }
             }
         }
