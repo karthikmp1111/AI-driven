@@ -4,7 +4,7 @@ pipeline {
     environment {
         AWS_REGION = 'us-west-1'
         S3_BUCKET = 'kar-weather-s3'
-        LAMBDA_DIR = 'lambda_functions' // 🔄 Use actual folder name
+        LAMBDA_DIR = 'src/lambda_functions' // 🔄 Use actual folder name
     }
 
     parameters {
