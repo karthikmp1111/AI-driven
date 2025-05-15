@@ -4,7 +4,7 @@ pipeline {
     environment {
         AWS_REGION = 'us-west-1'
         S3_BUCKET = 'kar-weather-s3'
-        LAMBDA_FUNCTIONS = "lambda"  // Add more like: "lambda,lambda2"
+        LAMBDA_DIR = 'lambda_functions' // 🔄 Use actual folder name
     }
 
     parameters {
@@ -25,9 +25,9 @@ pipeline {
                     string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_KEY')
                 ]) {
                     sh '''
-                    aws configure set aws_access_key_id $AWS_ACCESS_KEY
-                    aws configure set aws_secret_access_key $AWS_SECRET_KEY
-                    aws configure set region $AWS_REGION
+                        aws configure set aws_access_key_id $AWS_ACCESS_KEY
+                        aws configure set aws_secret_access_key $AWS_SECRET_KEY
+                        aws configure set region $AWS_REGION
                     '''
                 }
             }
@@ -39,22 +39,26 @@ pipeline {
             }
             steps {
                 script {
-                    def lambdas = LAMBDA_FUNCTIONS.split(',')  // Comma-separated Lambda directories
+                    // 🔄 Discover all subfolders (lambda1, lambda2, ...)
+                    def lambdaDirs = sh(script: "find ${LAMBDA_DIR} -mindepth 1 -maxdepth 1 -type d -exec basename {} \\;", returnStdout: true).trim().split("\n")
 
-                    lambdas.each { lambdaName ->
-                        def lambdaPath = "lambda_functions/${lambdaName}"
+                    lambdaDirs.each { lambdaName ->
+                        def lambdaPath = "${LAMBDA_DIR}/${lambdaName}"
 
-                        // Check for changes
-                        def hasChanges = sh(script: "git diff --quiet HEAD~1 ${lambdaPath}", returnStatus: true) != 0
+                        if (!fileExists("${lambdaPath}/build.sh")) {
+                            echo "Skipping ${lambdaName} — no build.sh found"
+                            return
+                        }
+
+                        // ✅ More resilient change detection
+                        def hasChanges = sh(script: "git diff --quiet HEAD~1 -- ${lambdaPath} || git log -1 --oneline -- ${lambdaPath}", returnStatus: true) != 0
 
                         if (hasChanges) {
                             echo "Changes detected in ${lambdaName}, building..."
 
-                            // Build the package using custom build.sh
                             sh "chmod +x ${lambdaPath}/build.sh"
                             sh "bash ${lambdaPath}/build.sh"
 
-                            // Upload to S3
                             sh "aws s3 cp ${lambdaPath}/package.zip s3://${S3_BUCKET}/lambda-packages/${lambdaName}/package.zip"
                         } else {
                             echo "No changes in ${lambdaName}, skipping build."
@@ -86,7 +90,7 @@ pipeline {
             }
             steps {
                 dir('terraform') {
-                    sh 'terraform apply -auto-approve'
+                    sh 'terraform apply -auto-approve tfplan'
                 }
             }
         }
