@@ -47,29 +47,35 @@ pipeline {
                 expression { params.APPLY_OR_DESTROY == 'apply' }
             }
             steps {
-                script {
-                    def changes = sh(script: "git diff --quiet origin/main -- ${LAMBDA_PATH}", returnStatus: true)
-                    if (changes != 0) {
-                        echo "Changes detected for ${LAMBDA_NAME}."
+                withCredentials([
+                    string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY'),
+                    string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_KEY')
+                ]) {
+                    script {
+                        def changes = sh(script: "git diff --quiet origin/main -- ${LAMBDA_PATH}", returnStatus: true)
+                        if (changes != 0) {
+                            echo "Changes detected for ${LAMBDA_NAME}."
 
-                        // Build Lambda package
-                        sh "bash ${LAMBDA_PATH}/build.sh"
+                            sh "bash ${LAMBDA_PATH}/build.sh"
 
-                        // Upload to S3
-                        sh "aws s3 cp ${PACKAGE_ZIP} s3://${S3_BUCKET}/lambda-packages/${LAMBDA_NAME}/package.zip"
+                            sh """
+                                export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY
+                                export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_KEY
+                                export AWS_DEFAULT_REGION=$AWS_REGION
+                                aws s3 cp ${PACKAGE_ZIP} s3://${S3_BUCKET}/lambda-packages/${LAMBDA_NAME}/package.zip
+                            """
 
-                        // Copy to Terraform folder
-                        sh "cp ${PACKAGE_ZIP} ${TERRAFORM_ZIP}"
-                    } else {
-                        echo "No changes in ${LAMBDA_NAME}. Checking if previous package exists..."
-                        sh '''
-                            if [ -f "${PACKAGE_ZIP}" ]; then
-                                cp ${PACKAGE_ZIP} ${TERRAFORM_ZIP}
-                            else
-                                echo "No existing package.zip found. Terraform may fail."
-                                exit 1
-                            fi
-                        '''
+                            sh "cp ${PACKAGE_ZIP} ${TERRAFORM_ZIP}"
+                        } else {
+                            echo "No changes in ${LAMBDA_NAME}. Checking if previous package exists..."
+                            script {
+                                if (fileExists("${PACKAGE_ZIP}")) {
+                                    sh "cp ${PACKAGE_ZIP} ${TERRAFORM_ZIP}"
+                                } else {
+                                    echo "No existing package.zip found. Terraform may fail if package is required."
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -77,16 +83,36 @@ pipeline {
 
         stage('Terraform Init') {
             steps {
-                dir('terraform') {
-                    sh 'terraform init -input=false'
+                withCredentials([
+                    string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY'),
+                    string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_KEY')
+                ]) {
+                    dir('terraform') {
+                        sh '''
+                            export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY
+                            export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_KEY
+                            export AWS_DEFAULT_REGION=$AWS_REGION
+                            terraform init -input=false
+                        '''
+                    }
                 }
             }
         }
 
         stage('Terraform Plan') {
             steps {
-                dir('terraform') {
-                    sh 'terraform plan -out=tfplan'
+                withCredentials([
+                    string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY'),
+                    string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_KEY')
+                ]) {
+                    dir('terraform') {
+                        sh '''
+                            export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY
+                            export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_KEY
+                            export AWS_DEFAULT_REGION=$AWS_REGION
+                            terraform plan -out=tfplan
+                        '''
+                    }
                 }
             }
         }
@@ -96,8 +122,18 @@ pipeline {
                 expression { params.APPLY_OR_DESTROY == 'apply' }
             }
             steps {
-                dir('terraform') {
-                    sh 'terraform apply -auto-approve tfplan'
+                withCredentials([
+                    string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY'),
+                    string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_KEY')
+                ]) {
+                    dir('terraform') {
+                        sh '''
+                            export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY
+                            export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_KEY
+                            export AWS_DEFAULT_REGION=$AWS_REGION
+                            terraform apply -auto-approve tfplan
+                        '''
+                    }
                 }
             }
         }
@@ -107,8 +143,18 @@ pipeline {
                 expression { params.APPLY_OR_DESTROY == 'destroy' }
             }
             steps {
-                dir('terraform') {
-                    sh 'terraform destroy -auto-approve'
+                withCredentials([
+                    string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY'),
+                    string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_KEY')
+                ]) {
+                    dir('terraform') {
+                        sh '''
+                            export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY
+                            export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_KEY
+                            export AWS_DEFAULT_REGION=$AWS_REGION
+                            terraform destroy -auto-approve
+                        '''
+                    }
                 }
             }
         }
