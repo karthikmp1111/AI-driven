@@ -36,29 +36,34 @@ pipeline {
             }
         }
 
-        stage('Handle Lambda Package') {
+        stage('Build and Upload Lambda Package') {
+            when {
+                expression { params.APPLY_OR_DESTROY == 'apply' }
+            }
             steps {
                 script {
-                    def hasPreviousCommit = (sh(script: 'git rev-parse --verify HEAD~1', returnStatus: true) == 0)
-                    def lambdaChanged = true
+                    def lambdaName = 'lambda'  // directory name under lambda-functions/
+                    def lambdaPath = "lambda-functions/${lambdaName}"
 
-                    if (hasPreviousCommit) {
-                        lambdaChanged = (sh(script: "git diff --quiet HEAD~1 -- ${LAMBDA_PATH}", returnStatus: true) != 0)
-                    }
+                    // Check if there are any changes for the lambda function
+                    if (sh(script: "git diff --quiet HEAD~1 ${lambdaPath}", returnStatus: true) != 0) {
+                        echo "Changes detected for ${lambdaName}, building and uploading..."
+                        
+                        // Build the Lambda package (this should create package.zip)
+                        sh "bash ${lambdaPath}/build.sh"
 
-                    if (lambdaChanged) {
-                        echo "Changes detected in ${LAMBDA_NAME}. Building package..."
-                        sh "bash ${LAMBDA_PATH}/build.sh"
+                        // Upload the built Lambda package to S3
+                        sh "aws s3 cp ${lambdaPath}/package.zip s3://${S3_BUCKET}/lambda-packages/${lambdaName}/package.zip"
                     } else {
-                        echo "No changes in ${LAMBDA_NAME}. Downloading package from S3..."
-                        sh "aws s3 cp s3://${S3_BUCKET}/lambda-packages/${LAMBDA_NAME}/package.zip ${PACKAGE_ZIP}"
+                        echo "No changes detected in ${lambdaName}, skipping build and upload."
                     }
 
-                    // Copy zip to Terraform directory
-                    sh "cp ${PACKAGE_ZIP} ${TERRAFORM_ZIP}"
+                    // Copy the built package to Terraform directory for deployment
+                    sh "cp ${lambdaPath}/package.zip ${TERRAFORM_ZIP}"
                 }
             }
         }
+
 
         stage('Terraform Init') {
             steps {
