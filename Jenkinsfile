@@ -61,15 +61,13 @@ pipeline {
                         // Copy to Terraform folder
                         sh "cp ${PACKAGE_ZIP} ${TERRAFORM_ZIP}"
                     } else {
-                        echo "No changes in ${LAMBDA_NAME}. Creating dummy zip if not present..."
-                        sh """
-                            if [ ! -f '${PACKAGE_ZIP}' ]; then
-                                echo 'Creating dummy ${PACKAGE_ZIP}'
-                                mkdir -p \$(dirname '${PACKAGE_ZIP}')
-                                echo | zip -q '${PACKAGE_ZIP}' -@
-                            fi
-                            cp '${PACKAGE_ZIP}' '${TERRAFORM_ZIP}'
-                        """
+                        echo "No changes in ${LAMBDA_NAME}. Downloading existing zip from S3..."
+
+                        // Ensure terraform folder exists
+                        sh "mkdir -p terraform"
+
+                        // Download latest zip from S3 for Terraform to use
+                        sh "aws s3 cp s3://${S3_BUCKET}/lambda-packages/${LAMBDA_NAME}/lambda_function.zip ${TERRAFORM_ZIP}"
                     }
                 }
             }
