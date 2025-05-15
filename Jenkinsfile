@@ -36,17 +36,13 @@ pipeline {
         // stage('Build and Upload Lambda Package') {
         //     steps {
         //         script {
-        //             def lambdaFolder = "lambda-functions/lambda"  // your lambda folder path
+        //             def lambdaFolder = "lambda-functions/lambda"
 
-        //             // Check if changes exist in this lambda folder compared to last commit
         //             def changed = sh(script: "git diff --quiet HEAD~1 ${lambdaFolder} || echo 'changed'", returnStdout: true).trim()
 
         //             if (changed == "changed") {
         //                 echo "Changes detected in Lambda, building and uploading..."
-        //                 // Build the lambda zip inside the lambda folder
         //                 sh "bash ${lambdaFolder}/build.sh"
-
-        //                 // Copy the built zip to terraform folder where terraform expects it
         //                 sh "cp ${lambdaFolder}/package.zip terraform/lambda_function.zip"
         //             } else {
         //                 echo "No changes in Lambda, skipping build and upload."
@@ -54,19 +50,24 @@ pipeline {
         //         }
         //     }
         // }
-        stage('Build and Upload Lambda Package') {
+
+        stage('Check for Lambda changes') {
             steps {
                 script {
-                    def lambdaFolder = "lambda-functions/lambda"
+                    // Check if there were changes in the lambda folder in the last commit
+                    def lambdaChanged = sh(
+                        script: 'git diff --quiet HEAD~1 lambda-functions/lambda || echo "changed"',
+                        returnStdout: true
+                    ).trim()
 
-                    def changed = sh(script: "git diff --quiet HEAD~1 ${lambdaFolder} || echo 'changed'", returnStdout: true).trim()
-
-                    if (changed == "changed") {
-                        echo "Changes detected in Lambda, building and uploading..."
-                        sh "bash ${lambdaFolder}/build.sh"
-                        sh "cp ${lambdaFolder}/package.zip terraform/lambda_function.zip"
+                    if (lambdaChanged == 'changed') {
+                        echo 'Changes detected in Lambda, building and uploading...'
+                        sh 'bash lambda-functions/lambda/build.sh'
+                        // You can add your upload/deploy steps here
+                        currentBuild.description = "Lambda package rebuilt"
                     } else {
-                        echo "No changes in Lambda, skipping build and upload."
+                        echo 'No changes detected in Lambda, using existing package.'
+                        currentBuild.description = "Lambda package reused"
                     }
                 }
             }
