@@ -36,35 +36,34 @@ pipeline {
             }
         }
 
-        stage('Build or Download Lambda Package') {
+        stage('Build and Upload Lambda Packages') {
             when {
                 expression { params.APPLY_OR_DESTROY == 'apply' }
             }
             steps {
                 script {
-                    def lambdaName = 'lambda'
-                    def lambdaPath = "lambda-functions/${lambdaName}"
-                    def s3Key = "lambda-packages/${lambdaName}/lambda_function.zip"
-                    def localZip = "${lambdaPath}/lambda_function.zip"
+                    def lambdas = LAMBDA_FUNCTIONS.split(',').collect { it.trim() }  // Trim spaces
+                    lambdas.each { lambdaName ->
+                        echo "Checking changes for Lambda: ${lambdaName}"
+                        def hasChanges = (sh(script: "git diff --quiet HEAD~1 lambda-functions/${lambdaName}", returnStatus: true) != 0)
+                        
+                        if (hasChanges) {
+                            echo "Changes detected for ${lambdaName}, building and uploading..."
+                            // Ensure the folder exists (optional)
+                            sh "mkdir -p lambda-functions/${lambdaName}"
+                            // Run the build script (make sure it creates package.zip in this folder)
+                            sh "bash lambda-functions/${lambdaName}/build.sh"
 
-                    def lambdaChanged = (sh(script: "git diff --quiet HEAD~1 ${lambdaPath}", returnStatus: true) != 0)
-
-                    if (lambdaChanged) {
-                        echo "Changes detected for ${lambdaName}, building and uploading..."
-                        sh "bash ${lambdaPath}/build.sh"
-                        sh "aws s3 cp ${localZip} s3://${S3_BUCKET}/${s3Key}"
-                    } else {
-                        echo "No changes detected in ${lambdaName}, downloading package from S3..."
-                        sh "mkdir -p ${lambdaPath}" // ensure directory exists
-                        sh "aws s3 cp s3://${S3_BUCKET}/${s3Key} ${localZip}"
+                            // Upload to S3, ensure variables are expanded properly
+                            sh "aws s3 cp lambda-functions/${lambdaName}/package.zip s3://${S3_BUCKET}/lambda-packages/${lambdaName}/package.zip"
+                        } else {
+                            echo "No changes detected in ${lambdaName}, skipping build and upload."
+                        }
                     }
-
-                    // Copy the zip to Terraform directory
-                    sh "cp ${localZip} ${TERRAFORM_ZIP}"
                 }
             }
         }
-
+        
         stage('Terraform Init') {
             steps {
                 dir('terraform') {
