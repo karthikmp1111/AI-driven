@@ -42,28 +42,20 @@ pipeline {
             }
             steps {
                 script {
-                    def lambdas = LAMBDA_FUNCTIONS.split(',').collect { it.trim() }  // Trim spaces
-                    lambdas.each { lambdaName ->
-                        echo "Checking changes for Lambda: ${lambdaName}"
-                        def hasChanges = (sh(script: "git diff --quiet HEAD~1 lambda-functions/${lambdaName}", returnStatus: true) != 0)
-                        
-                        if (hasChanges) {
-                            echo "Changes detected for ${lambdaName}, building and uploading..."
-                            // Ensure the folder exists (optional)
-                            sh "mkdir -p lambda-functions/${lambdaName}"
-                            // Run the build script (make sure it creates package.zip in this folder)
-                            sh "bash lambda-functions/${lambdaName}/build.sh"
-
-                            // Upload to S3, ensure variables are expanded properly
-                            sh "aws s3 cp lambda-functions/${lambdaName}/package.zip s3://${S3_BUCKET}/lambda-packages/${lambdaName}/package.zip"
-                        } else {
-                            echo "No changes detected in ${lambdaName}, skipping build and upload."
-                        }
+                    echo "Checking changes for Lambda: ${env.LAMBDA_NAME}"
+                    def hasChanges = (sh(script: "git diff --quiet HEAD~1 ${env.LAMBDA_PATH}", returnStatus: true) != 0)
+                    
+                    if (hasChanges) {
+                        echo "Changes detected for ${env.LAMBDA_NAME}, building and uploading..."
+                        sh "bash ${env.LAMBDA_PATH}/build.sh"
+                        sh "aws s3 cp ${env.PACKAGE_ZIP} s3://${env.S3_BUCKET}/lambda-packages/${env.LAMBDA_NAME}/package.zip"
+                    } else {
+                        echo "No changes detected in ${env.LAMBDA_NAME}, skipping build and upload."
                     }
                 }
             }
         }
-        
+
         stage('Terraform Init') {
             steps {
                 dir('terraform') {
