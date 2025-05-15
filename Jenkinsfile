@@ -43,20 +43,25 @@ pipeline {
         }
 
         stage('Build & Upload Lambda') {
-            when {
-                expression { params.APPLY_OR_DESTROY == 'apply' }
-            }
             steps {
                 script {
-                    def changes = sh(script: "git diff --quiet origin/main -- ${LAMBDA_PATH}", returnStatus: true)
-                    if (changes != 0) {
-                        echo "Changes detected for ${LAMBDA_NAME}."
+                    if (params.APPLY_OR_DESTROY == 'apply') {
+                        // On apply, build if changed, else download existing zip
+                        def changes = sh(script: "git diff --quiet origin/main -- ${LAMBDA_PATH}", returnStatus: true)
+                        if (changes != 0) {
+                            echo "Changes detected for ${LAMBDA_NAME}."
 
-                        sh "bash ${LAMBDA_PATH}/build.sh"
-                        sh "aws s3 cp ${PACKAGE_ZIP} s3://${S3_BUCKET}/lambda-packages/${LAMBDA_NAME}/lambda_function.zip"
-                        sh "cp ${PACKAGE_ZIP} ${TERRAFORM_ZIP}"
-                    } else {
-                        echo "No changes in ${LAMBDA_NAME}. Downloading existing zip from S3..."
+                            sh "bash ${LAMBDA_PATH}/build.sh"
+                            sh "aws s3 cp ${PACKAGE_ZIP} s3://${S3_BUCKET}/lambda-packages/${LAMBDA_NAME}/lambda_function.zip"
+                            sh "cp ${PACKAGE_ZIP} ${TERRAFORM_ZIP}"
+                        } else {
+                            echo "No changes in ${LAMBDA_NAME}. Downloading existing zip from S3..."
+                            sh "mkdir -p terraform"
+                            sh "aws s3 cp s3://${S3_BUCKET}/lambda-packages/${LAMBDA_NAME}/lambda_function.zip ${TERRAFORM_ZIP}"
+                        }
+                    } else if (params.APPLY_OR_DESTROY == 'destroy') {
+                        // On destroy, just download the zip, no build needed
+                        echo "Destroy mode: Downloading existing zip from S3..."
                         sh "mkdir -p terraform"
                         sh "aws s3 cp s3://${S3_BUCKET}/lambda-packages/${LAMBDA_NAME}/lambda_function.zip ${TERRAFORM_ZIP}"
                     }
