@@ -55,10 +55,11 @@ pipeline {
                         sh "aws s3 cp ${localZip} s3://${S3_BUCKET}/${s3Key}"
                     } else {
                         echo "No changes detected in ${lambdaName}, downloading package from S3..."
+                        sh "mkdir -p ${lambdaPath}" // Ensure directory exists
                         sh "aws s3 cp s3://${S3_BUCKET}/${s3Key} ${localZip}"
                     }
 
-                    // Copy package to Terraform folder
+                    // Copy the zip to Terraform directory
                     sh "cp ${localZip} ${TERRAFORM_ZIP}"
                 }
             }
