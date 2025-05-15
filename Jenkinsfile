@@ -4,12 +4,14 @@ pipeline {
     environment {
         AWS_REGION = 'us-west-1'
         S3_BUCKET = 'kar-weather-s3'
-        LAMBDA_PATH = 'lambda-functions/lambda'
+        LAMBDA_NAME = 'lambda'
+        LAMBDA_PATH = "lambda-functions/lambda"
+        PACKAGE_ZIP = "lambda-functions/lambda/package.zip"
+        TERRAFORM_ZIP = "terraform/lambda_function.zip"
     }
 
     parameters {
         choice(name: 'APPLY_OR_DESTROY', choices: ['apply', 'destroy'], description: 'Apply or destroy Terraform infrastructure')
-        string(name: 'LAMBDA_FUNCTIONS', defaultValue: 'lambda1,lambda2', description: 'Comma-separated Lambda function directories')
     }
 
     stages {
@@ -34,18 +36,26 @@ pipeline {
             }
         }
 
-        stage('Download Lambda Package if Not Changed') {
+        stage('Handle Lambda Package') {
             steps {
                 script {
-                    def lambdas = params.LAMBDA_FUNCTIONS.split(',')
-                    lambdas.each { lambdaName ->
-                        if (sh(script: "git diff --quiet HEAD~1 lambda-functions/${lambdaName}", returnStatus: true) != 0) {
-                            echo "Changes detected for ${lambdaName}, package already built/uploaded."
-                        } else {
-                            echo "No changes in ${lambdaName}, downloading package from S3..."
-                            sh "aws s3 cp s3://$S3_BUCKET/lambda-packages/${lambdaName}/package.zip lambda-functions/${lambdaName}/package.zip"
-                        }
+                    def hasPreviousCommit = (sh(script: 'git rev-parse --verify HEAD~1', returnStatus: true) == 0)
+                    def lambdaChanged = true
+
+                    if (hasPreviousCommit) {
+                        lambdaChanged = (sh(script: "git diff --quiet HEAD~1 -- ${LAMBDA_PATH}", returnStatus: true) != 0)
                     }
+
+                    if (lambdaChanged) {
+                        echo "Changes detected in ${LAMBDA_NAME}. Building package..."
+                        sh "bash ${LAMBDA_PATH}/build.sh"
+                    } else {
+                        echo "No changes in ${LAMBDA_NAME}. Downloading package from S3..."
+                        sh "aws s3 cp s3://${S3_BUCKET}/lambda-packages/${LAMBDA_NAME}/package.zip ${PACKAGE_ZIP}"
+                    }
+
+                    // Copy zip to Terraform directory
+                    sh "cp ${PACKAGE_ZIP} ${TERRAFORM_ZIP}"
                 }
             }
         }
@@ -95,7 +105,6 @@ pipeline {
         }
     }
 }
-
 
 
 
