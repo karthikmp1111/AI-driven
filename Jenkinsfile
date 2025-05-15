@@ -33,20 +33,37 @@ pipeline {
             }
         }
 
+        // stage('Build and Upload Lambda Package') {
+        //     steps {
+        //         script {
+        //             def lambdaFolder = "lambda-functions/lambda"  // your lambda folder path
+
+        //             // Check if changes exist in this lambda folder compared to last commit
+        //             def changed = sh(script: "git diff --quiet HEAD~1 ${lambdaFolder} || echo 'changed'", returnStdout: true).trim()
+
+        //             if (changed == "changed") {
+        //                 echo "Changes detected in Lambda, building and uploading..."
+        //                 // Build the lambda zip inside the lambda folder
+        //                 sh "bash ${lambdaFolder}/build.sh"
+
+        //                 // Copy the built zip to terraform folder where terraform expects it
+        //                 sh "cp ${lambdaFolder}/package.zip terraform/lambda_function.zip"
+        //             } else {
+        //                 echo "No changes in Lambda, skipping build and upload."
+        //             }
+        //         }
+        //     }
+        // }
         stage('Build and Upload Lambda Package') {
             steps {
                 script {
-                    def lambdaFolder = "lambda-functions/lambda"  // your lambda folder path
+                    def lambdaFolder = "lambda-functions/lambda"
 
-                    // Check if changes exist in this lambda folder compared to last commit
                     def changed = sh(script: "git diff --quiet HEAD~1 ${lambdaFolder} || echo 'changed'", returnStdout: true).trim()
 
                     if (changed == "changed") {
                         echo "Changes detected in Lambda, building and uploading..."
-                        // Build the lambda zip inside the lambda folder
                         sh "bash ${lambdaFolder}/build.sh"
-
-                        // Copy the built zip to terraform folder where terraform expects it
                         sh "cp ${lambdaFolder}/package.zip terraform/lambda_function.zip"
                     } else {
                         echo "No changes in Lambda, skipping build and upload."
@@ -54,7 +71,6 @@ pipeline {
                 }
             }
         }
-
 
         stage('Terraform Init') {
             steps {
