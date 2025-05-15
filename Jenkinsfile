@@ -34,27 +34,27 @@ pipeline {
         }
 
         stage('Build and Upload Lambda Package') {
-            when {
-                expression { params.APPLY_OR_DESTROY == 'apply' }
-            }
             steps {
-                dir("${env.LAMBDA_PATH}") {
-                    script {
-                        def hasChanges = sh(script: "git diff --quiet HEAD~1 -- . || git log -1 --oneline -- .", returnStatus: true) != 0
+                script {
+                    def lambdaFolder = "lambda-functions/lambda"  // your lambda folder path
 
-                        if (hasChanges) {
-                            echo "Changes detected in Lambda, building and uploading..."
-                            sh "chmod +x build.sh"
-                            sh "./build.sh"
+                    // Check if changes exist in this lambda folder compared to last commit
+                    def changed = sh(script: "git diff --quiet HEAD~1 ${lambdaFolder} || echo 'changed'", returnStdout: true).trim()
 
-                            sh "aws s3 cp lambda_function.zip s3://${S3_BUCKET}/lambda-packages/lambda/lambda_function.zip"
-                        } else {
-                            echo "No changes in Lambda, skipping build and upload."
-                        }
+                    if (changed == "changed") {
+                        echo "Changes detected in Lambda, building and uploading..."
+                        // Build the lambda zip inside the lambda folder
+                        sh "bash ${lambdaFolder}/build.sh"
+
+                        // Copy the built zip to terraform folder where terraform expects it
+                        sh "cp ${lambdaFolder}/package.zip terraform/lambda_function.zip"
+                    } else {
+                        echo "No changes in Lambda, skipping build and upload."
                     }
                 }
             }
         }
+
 
         stage('Terraform Init') {
             steps {
