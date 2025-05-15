@@ -32,39 +32,22 @@ resource "aws_iam_policy_attachment" "lambda_s3_access" {
 }
 
 # Lambda Function from S3
-# resource "aws_lambda_function" "weather" {
-#   function_name = var.lambda_function_name
-#   role          = aws_iam_role.lambda_exec_role.arn
-#   handler       = "lambda_function.lambda_handler"
-#   runtime       = "python3.9"
-
-#   s3_bucket = var.s3_bucket
-#   s3_key    = "lambda-packages/lambda/lambda_function.zip"
-
-#   source_code_hash = filebase64sha256("${path.module}/lambda_function.zip")
-
-#   environment {
-#     variables = {
-#       WEATHER_API_KEY = var.weather_api_key
-#       LOCATION        = var.location
-#       BUCKET_NAME     = var.bucket_name
-#     }
-#   }
-# }
-
 resource "aws_lambda_function" "weather" {
-  function_name = "weather"
-  role          = aws_iam_role.lambda_exec.arn
+  function_name = var.lambda_function_name
+  role          = aws_iam_role.lambda_exec_role.arn
   handler       = "lambda_function.lambda_handler"
-  runtime       = "python3.10"
+  runtime       = "python3.9"
 
-  s3_bucket        = var.s3_bucket
-  s3_key           = "lambda-packages/lambda/package.zip"
-  source_code_hash = filebase64sha256("${path.module}/lambda_function.zip") # Optional if you want hash validation
+  s3_bucket = var.s3_bucket
+  s3_key    = "lambda-packages/lambda/lambda_function.zip"
+
+  source_code_hash = filebase64sha256("${path.module}/lambda_function.zip")
 
   environment {
     variables = {
-      foo = "bar"
+      WEATHER_API_KEY = var.weather_api_key
+      LOCATION        = var.location
+      BUCKET_NAME     = var.bucket_name
     }
   }
 }
