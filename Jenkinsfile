@@ -42,7 +42,7 @@ pipeline {
                     def lambdas = LAMBDA_FUNCTIONS.split(',')  // Comma-separated Lambda directories
 
                     lambdas.each { lambdaName ->
-                        def lambdaPath = "lambda_function/${lambdaName}"
+                        def lambdaPath = "lambda_functions/${lambdaName}"
 
                         // Check for changes
                         def hasChanges = sh(script: "git diff --quiet HEAD~1 ${lambdaPath}", returnStatus: true) != 0
