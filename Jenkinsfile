@@ -1,64 +1,99 @@
 pipeline {
     agent any
- 
+
     environment {
         AWS_REGION = 'us-west-1'
         S3_BUCKET = 'kar-weather-s3'
-        LAMBDA_PATH = 'lambda-functions/lambda'
+        LAMBDA_NAME = 'lambda'
+        LAMBDA_PATH = "lambda-functions/lambda"
+        PACKAGE_ZIP = "${LAMBDA_PATH}/package.zip"
+        TERRAFORM_ZIP = "terraform/lambda_function.zip"
     }
- 
+
     parameters {
         choice(name: 'APPLY_OR_DESTROY', choices: ['apply', 'destroy'], description: 'Apply or destroy Terraform infrastructure')
     }
- 
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+    }
+
     stages {
         stage('Checkout Code') {
             steps {
                 git branch: 'main', url: 'https://github.com/karthikmp1111/AI-driven.git'
             }
         }
- 
-        stage('Setup AWS Credentials') {
+
+        stage('Verify AWS Credentials') {
             steps {
                 withCredentials([
                     string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY'),
                     string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_KEY')
                 ]) {
                     sh '''
-                        aws configure set aws_access_key_id $AWS_ACCESS_KEY
-                        aws configure set aws_secret_access_key $AWS_SECRET_KEY
-                        aws configure set region $AWS_REGION
+                        export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY
+                        export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_KEY
+                        export AWS_DEFAULT_REGION=$AWS_REGION
+                        aws sts get-caller-identity
                     '''
                 }
             }
         }
- 
-        stage('Build and Upload Lambda Package') {
+
+        stage('Build & Upload Lambda') {
+            when {
+                expression { params.APPLY_OR_DESTROY == 'apply' }
+            }
             steps {
                 script {
-                    def lambdaFolder = "lambda-functions/lambda"
- 
-                    def changed = sh(script: "git diff --quiet HEAD~1 ${lambdaFolder} || echo 'changed'", returnStdout: true).trim()
- 
-                    if (changed == "changed") {
-                        echo "Changes detected in Lambda, building and uploading..."
-                        sh "bash ${lambdaFolder}/build.sh"
-                        sh "cp ${lambdaFolder}/package.zip terraform/lambda_function.zip"
+                    def changes = sh(script: "git diff --quiet origin/main -- ${LAMBDA_PATH}", returnStatus: true)
+                    if (changes != 0) {
+                        echo "Changes detected for ${LAMBDA_NAME}."
+
+                        // Build Lambda package
+                        sh "bash ${LAMBDA_PATH}/build.sh"
+
+                        // Upload to S3
+                        sh "aws s3 cp ${PACKAGE_ZIP} s3://${S3_BUCKET}/lambda-packages/${LAMBDA_NAME}/package.zip"
+
+                        // Copy to Terraform folder
+                        sh "cp ${PACKAGE_ZIP} ${TERRAFORM_ZIP}"
                     } else {
-                        echo "No changes in Lambda, skipping build and upload."
+                        echo "No changes in ${LAMBDA_NAME}. Checking if previous package exists..."
+                        sh '''
+                            if [ -f "${PACKAGE_ZIP}" ]; then
+                                cp ${PACKAGE_ZIP} ${TERRAFORM_ZIP}
+                            else
+                                echo "No existing package.zip found. Terraform may fail."
+                                exit 1
+                            fi
+                        '''
                     }
                 }
             }
         }
- 
+
         stage('Terraform Init') {
             steps {
+                script {
+                    // Ensure lambda_function.zip exists even during destroy
+                    sh '''
+                        if [ ! -f terraform/lambda_function.zip ]; then
+                            echo "Creating empty dummy lambda_function.zip to satisfy Terraform."
+                            mkdir -p terraform
+                            cd terraform
+                            zip -q lambda_function.zip --junk-path - <<< ""
+                        fi
+                    '''
+                }
                 dir('terraform') {
-                    sh 'terraform init'
+                    sh 'terraform init -input=false'
                 }
             }
         }
- 
+
         stage('Terraform Plan') {
             steps {
                 dir('terraform') {
@@ -66,7 +101,7 @@ pipeline {
                 }
             }
         }
- 
+
         stage('Terraform Apply') {
             when {
                 expression { params.APPLY_OR_DESTROY == 'apply' }
@@ -77,7 +112,7 @@ pipeline {
                 }
             }
         }
- 
+
         stage('Terraform Destroy') {
             when {
                 expression { params.APPLY_OR_DESTROY == 'destroy' }
@@ -88,15 +123,23 @@ pipeline {
                 }
             }
         }
- 
+
         stage('Clean Workspace') {
             steps {
                 cleanWs()
             }
         }
     }
-}
 
+    post {
+        failure {
+            echo 'Build failed. Cleaning up credentials and temporary files.'
+        }
+        always {
+            echo 'Pipeline completed.'
+        }
+    }
+}
 
 
 // pipeline {
