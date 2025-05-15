@@ -1,181 +1,101 @@
 pipeline {
     agent any
-
+ 
     environment {
         AWS_REGION = 'us-west-1'
         S3_BUCKET = 'kar-weather-s3'
-        LAMBDA_NAME = 'lambda'
-        LAMBDA_PATH = "lambda-functions/lambda"
-        PACKAGE_ZIP = "${LAMBDA_PATH}/package.zip"
-        TERRAFORM_ZIP = "terraform/lambda_function.zip"
+        LAMBDA_PATH = 'lambda-functions/lambda'
     }
-
+ 
     parameters {
         choice(name: 'APPLY_OR_DESTROY', choices: ['apply', 'destroy'], description: 'Apply or destroy Terraform infrastructure')
     }
-
-    options {
-        timestamps()
-        disableConcurrentBuilds()
-    }
-
+ 
     stages {
         stage('Checkout Code') {
             steps {
                 git branch: 'main', url: 'https://github.com/karthikmp1111/AI-driven.git'
             }
         }
-
-        stage('Verify AWS Credentials') {
+ 
+        stage('Setup AWS Credentials') {
             steps {
                 withCredentials([
                     string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY'),
                     string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_KEY')
                 ]) {
                     sh '''
-                        export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY
-                        export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_KEY
-                        export AWS_DEFAULT_REGION=$AWS_REGION
-                        aws sts get-caller-identity
+                        aws configure set aws_access_key_id $AWS_ACCESS_KEY
+                        aws configure set aws_secret_access_key $AWS_SECRET_KEY
+                        aws configure set region $AWS_REGION
                     '''
                 }
             }
         }
-
-        stage('Build & Upload Lambda') {
-            when {
-                expression { params.APPLY_OR_DESTROY == 'apply' }
-            }
+ 
+        stage('Build and Upload Lambda Package') {
             steps {
-                withCredentials([
-                    string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY'),
-                    string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_KEY')
-                ]) {
-                    script {
-                        def changes = sh(script: "git diff --quiet origin/main -- ${LAMBDA_PATH}", returnStatus: true)
-                        if (changes != 0) {
-                            echo "Changes detected for ${LAMBDA_NAME}."
-
-                            sh "bash ${LAMBDA_PATH}/build.sh"
-
-                            sh """
-                                export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY
-                                export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_KEY
-                                export AWS_DEFAULT_REGION=$AWS_REGION
-                                aws s3 cp ${PACKAGE_ZIP} s3://${S3_BUCKET}/lambda-packages/${LAMBDA_NAME}/package.zip
-                            """
-
-                            sh "cp ${PACKAGE_ZIP} ${TERRAFORM_ZIP}"
-                        } else {
-                            echo "No changes in ${LAMBDA_NAME}. Checking if previous package exists..."
-                            script {
-                                if (fileExists("${PACKAGE_ZIP}")) {
-                                    sh "cp ${PACKAGE_ZIP} ${TERRAFORM_ZIP}"
-                                } else {
-                                    echo "No existing package.zip found. Terraform may fail if package is required."
-                                }
-                            }
-                        }
+                script {
+                    def lambdaFolder = "lambda-functions/lambda"
+ 
+                    def changed = sh(script: "git diff --quiet HEAD~1 ${lambdaFolder} || echo 'changed'", returnStdout: true).trim()
+ 
+                    if (changed == "changed") {
+                        echo "Changes detected in Lambda, building and uploading..."
+                        sh "bash ${lambdaFolder}/build.sh"
+                        sh "cp ${lambdaFolder}/package.zip terraform/lambda_function.zip"
+                    } else {
+                        echo "No changes in Lambda, skipping build and upload."
                     }
                 }
             }
         }
-
+ 
         stage('Terraform Init') {
             steps {
-                withCredentials([
-                    string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY'),
-                    string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_KEY')
-                ]) {
-                    dir('terraform') {
-                        sh '''
-                            export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY
-                            export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_KEY
-                            export AWS_DEFAULT_REGION=$AWS_REGION
-                            terraform init -input=false
-                        '''
-                    }
+                dir('terraform') {
+                    sh 'terraform init'
                 }
             }
         }
-
+ 
         stage('Terraform Plan') {
             steps {
-                withCredentials([
-                    string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY'),
-                    string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_KEY')
-                ]) {
-                    dir('terraform') {
-                        sh '''
-                            export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY
-                            export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_KEY
-                            export AWS_DEFAULT_REGION=$AWS_REGION
-                            terraform plan -out=tfplan
-                        '''
-                    }
+                dir('terraform') {
+                    sh 'terraform plan -out=tfplan'
                 }
             }
         }
-
+ 
         stage('Terraform Apply') {
             when {
                 expression { params.APPLY_OR_DESTROY == 'apply' }
             }
             steps {
-                withCredentials([
-                    string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY'),
-                    string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_KEY')
-                ]) {
-                    dir('terraform') {
-                        sh '''
-                            export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY
-                            export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_KEY
-                            export AWS_DEFAULT_REGION=$AWS_REGION
-                            terraform apply -auto-approve tfplan
-                        '''
-                    }
+                dir('terraform') {
+                    sh 'terraform apply -auto-approve tfplan'
                 }
             }
         }
-
+ 
         stage('Terraform Destroy') {
             when {
                 expression { params.APPLY_OR_DESTROY == 'destroy' }
             }
             steps {
-                withCredentials([
-                    string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'AWS_ACCESS_KEY'),
-                    string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'AWS_SECRET_KEY')
-                ]) {
-                    dir('terraform') {
-                        sh '''
-                            export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY
-                            export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_KEY
-                            export AWS_DEFAULT_REGION=$AWS_REGION
-                            terraform destroy -auto-approve
-                        '''
-                    }
+                dir('terraform') {
+                    sh 'terraform destroy -auto-approve'
                 }
             }
         }
-
+ 
         stage('Clean Workspace') {
             steps {
                 cleanWs()
             }
         }
     }
-
-    post {
-        failure {
-            echo 'Build failed. Cleaning up credentials and temporary files.'
-        }
-        always {
-            echo 'Pipeline completed.'
-        }
-    }
 }
-
 
 
 
