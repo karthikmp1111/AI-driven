@@ -51,23 +51,17 @@ pipeline {
         //     }
         // }
 
-        stage('Check for Lambda changes') {
+        stage('Download Lambda Package if Not Changed') {
             steps {
                 script {
-                    // Check if there were changes in the lambda folder in the last commit
-                    def lambdaChanged = sh(
-                        script: 'git diff --quiet HEAD~1 lambda-functions/lambda || echo "changed"',
-                        returnStdout: true
-                    ).trim()
-
-                    if (lambdaChanged == 'changed') {
-                        echo 'Changes detected in Lambda, building and uploading...'
-                        sh 'bash lambda-functions/lambda/build.sh'
-                        // You can add your upload/deploy steps here
-                        currentBuild.description = "Lambda package rebuilt"
-                    } else {
-                        echo 'No changes detected in Lambda, using existing package.'
-                        currentBuild.description = "Lambda package reused"
+                    def lambdas = LAMBDA_FUNCTIONS.split(',')
+                    lambdas.each { lambdaName ->
+                        if (sh(script: "git diff --quiet HEAD~1 lambda-functions/${lambdaName}", returnStatus: true) != 0) {
+                            echo "Changes detected for ${lambdaName}, package already built/uploaded."
+                        } else {
+                            echo "No changes in ${lambdaName}, downloading package from S3..."
+                            sh "aws s3 cp s3://$S3_BUCKET/lambda-packages/${lambdaName}/package.zip lambda-functions/${lambdaName}/package.zip"
+                        }
                     }
                 }
             }
