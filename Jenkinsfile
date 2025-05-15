@@ -56,20 +56,20 @@ pipeline {
                         sh "bash ${LAMBDA_PATH}/build.sh"
 
                         // Upload to S3
-                        sh "aws s3 cp ${PACKAGE_ZIP} s3://${S3_BUCKET}/lambda-packages/${LAMBDA_NAME}/package.zip"
+                        sh "aws s3 cp ${PACKAGE_ZIP} s3://${S3_BUCKET}/lambda-packages/${LAMBDA_NAME}/lambda_function.zip"
 
                         // Copy to Terraform folder
                         sh "cp ${PACKAGE_ZIP} ${TERRAFORM_ZIP}"
                     } else {
-                        echo "No changes in ${LAMBDA_NAME}. Checking if previous package exists..."
-                        sh '''
-                            if [ -f "${PACKAGE_ZIP}" ]; then
-                                cp ${PACKAGE_ZIP} ${TERRAFORM_ZIP}
-                            else
-                                echo "No existing package.zip found. Terraform may fail."
-                                exit 1
+                        echo "No changes in ${LAMBDA_NAME}. Creating dummy zip if not present..."
+                        sh """
+                            if [ ! -f '${PACKAGE_ZIP}' ]; then
+                                echo 'Creating dummy ${PACKAGE_ZIP}'
+                                mkdir -p \$(dirname '${PACKAGE_ZIP}')
+                                zip -q '${PACKAGE_ZIP}' --junk-path - <<< ""
                             fi
-                        '''
+                            cp '${PACKAGE_ZIP}' '${TERRAFORM_ZIP}'
+                        """
                     }
                 }
             }
@@ -77,19 +77,8 @@ pipeline {
 
         stage('Terraform Init') {
             steps {
-                script {
-                    // Ensure lambda_function.zip exists even during destroy
-                    sh '''
-                        if [ ! -f terraform/lambda_function.zip ]; then
-                            echo "Creating empty dummy lambda_function.zip to satisfy Terraform."
-                            mkdir -p terraform
-                            cd terraform
-                            zip -q lambda_function.zip --junk-path - <<< ""
-                        fi
-                    '''
-                }
                 dir('terraform') {
-                    sh 'terraform init -input=false'
+                    sh 'terraform init'
                 }
             }
         }
@@ -140,6 +129,9 @@ pipeline {
         }
     }
 }
+
+
+
 
 
 // pipeline {
