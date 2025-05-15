@@ -66,7 +66,7 @@ pipeline {
                             if [ ! -f '${PACKAGE_ZIP}' ]; then
                                 echo 'Creating dummy ${PACKAGE_ZIP}'
                                 mkdir -p \$(dirname '${PACKAGE_ZIP}')
-                                zip -q '${PACKAGE_ZIP}' --junk-path - <<< ""
+                                echo | zip -q '${PACKAGE_ZIP}' -@
                             fi
                             cp '${PACKAGE_ZIP}' '${TERRAFORM_ZIP}'
                         """
