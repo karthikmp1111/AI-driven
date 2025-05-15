@@ -9,6 +9,7 @@ pipeline {
 
     parameters {
         choice(name: 'APPLY_OR_DESTROY', choices: ['apply', 'destroy'], description: 'Apply or destroy Terraform infrastructure')
+        string(name: 'LAMBDA_FUNCTIONS', defaultValue: 'lambda1,lambda2', description: 'Comma-separated Lambda function directories')
     }
 
     stages {
@@ -33,28 +34,10 @@ pipeline {
             }
         }
 
-        // stage('Build and Upload Lambda Package') {
-        //     steps {
-        //         script {
-        //             def lambdaFolder = "lambda-functions/lambda"
-
-        //             def changed = sh(script: "git diff --quiet HEAD~1 ${lambdaFolder} || echo 'changed'", returnStdout: true).trim()
-
-        //             if (changed == "changed") {
-        //                 echo "Changes detected in Lambda, building and uploading..."
-        //                 sh "bash ${lambdaFolder}/build.sh"
-        //                 sh "cp ${lambdaFolder}/package.zip terraform/lambda_function.zip"
-        //             } else {
-        //                 echo "No changes in Lambda, skipping build and upload."
-        //             }
-        //         }
-        //     }
-        // }
-
         stage('Download Lambda Package if Not Changed') {
             steps {
                 script {
-                    def lambdas = LAMBDA_FUNCTIONS.split(',')
+                    def lambdas = params.LAMBDA_FUNCTIONS.split(',')
                     lambdas.each { lambdaName ->
                         if (sh(script: "git diff --quiet HEAD~1 lambda-functions/${lambdaName}", returnStatus: true) != 0) {
                             echo "Changes detected for ${lambdaName}, package already built/uploaded."
