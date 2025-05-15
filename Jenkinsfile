@@ -4,11 +4,11 @@ pipeline {
     environment {
         AWS_REGION = 'us-west-1'
         S3_BUCKET = 'kar-weather-s3'
-        LAMBDA_DIR = 'lambda-functions' // 🔄 Use actual folder name
+        LAMBDA_PATH = 'lambda-functions/lambda'
     }
 
     parameters {
-        choice(name: 'APPLY_OR_DESTROY', choices: ['apply', 'destroy'], description: 'Choose whether to apply or destroy Terraform resources')
+        choice(name: 'APPLY_OR_DESTROY', choices: ['apply', 'destroy'], description: 'Apply or destroy Terraform infrastructure')
     }
 
     stages {
@@ -33,35 +33,23 @@ pipeline {
             }
         }
 
-        stage('Build and Upload Lambda Packages') {
+        stage('Build and Upload Lambda Package') {
             when {
                 expression { params.APPLY_OR_DESTROY == 'apply' }
             }
             steps {
-                script {
-                    // 🔄 Discover all subfolders (lambda1, lambda2, ...)
-                    def lambdaDirs = sh(script: "find ${LAMBDA_DIR} -mindepth 1 -maxdepth 1 -type d -exec basename {} \\;", returnStdout: true).trim().split("\n")
-
-                    lambdaDirs.each { lambdaName ->
-                        def lambdaPath = "${LAMBDA_DIR}/${lambdaName}"
-
-                        if (!fileExists("${lambdaPath}/build.sh")) {
-                            echo "Skipping ${lambdaName} — no build.sh found"
-                            return
-                        }
-
-                        // ✅ More resilient change detection
-                        def hasChanges = sh(script: "git diff --quiet HEAD~1 -- ${lambdaPath} || git log -1 --oneline -- ${lambdaPath}", returnStatus: true) != 0
+                dir("${env.LAMBDA_PATH}") {
+                    script {
+                        def hasChanges = sh(script: "git diff --quiet HEAD~1 -- . || git log -1 --oneline -- .", returnStatus: true) != 0
 
                         if (hasChanges) {
-                            echo "Changes detected in ${lambdaName}, building..."
+                            echo "Changes detected in Lambda, building and uploading..."
+                            sh "chmod +x build.sh"
+                            sh "./build.sh"
 
-                            sh "chmod +x ${lambdaPath}/build.sh"
-                            sh "bash ${lambdaPath}/build.sh"
-
-                            sh "aws s3 cp ${lambdaPath}/package.zip s3://${S3_BUCKET}/lambda-packages/${lambdaName}/package.zip"
+                            sh "aws s3 cp lambda_function.zip s3://${S3_BUCKET}/lambda-packages/lambda/lambda_function.zip"
                         } else {
-                            echo "No changes in ${lambdaName}, skipping build."
+                            echo "No changes in Lambda, skipping build and upload."
                         }
                     }
                 }
